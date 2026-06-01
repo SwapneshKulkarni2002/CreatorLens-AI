@@ -1,0 +1,25 @@
+Requirement already satisfied: numpy==2.4.6 in .\.venv\Lib\site-packages (2.4.6)
+Collecting grpcio==1.80.0
+  Downloading grpcio-1.80.0-cp312-cp312-win_amd64.whl.metadata (3.9 kB)
+Collecting grpcio-tools==1.80.0
+  Downloading grpcio_tools-1.80.0-cp312-cp312-win_amd64.whl.metadata (5.5 kB)
+Requirement already satisfied: protobuf==6.33.6 in .\.venv\Lib\site-packages (6.33.6)
+Requirement already satisfied: portalocker==2.10.1 in .\.venv\Lib\site-packages (2.10.1)
+Collecting h2==4.3.0
+  Downloading h2-4.3.0-py3-none-any.whl.metadata (5.1 kB)
+Requirement already satisfied: hpack==4.1.0 in .\.venv\Lib\site-packages (4.1.0)
+Requirement already satisfied: hyperframe==6.1.0 in .\.venv\Lib\site-packages (6.1.0)
+Collecting qdrant-client==1.12.1
+  Downloading qdrant_client-1.12.1-py3-none-any.whl.metadata (10 kB)
+Collecting langchain-qdrant==0.2.0
+  Downloading langchain_qdrant-0.2.0-py3-none-any.whl.metadata (1.8 kB)
+Downloading grpcio-1.80.0-cp312-cp312-win_amd64.whl (4.9 MB)
+   ---------------------------------------- 4.9/4.9 MB 11.8 MB/s  0:00:00
+Downloading grpcio_tools-1.80.0-cp312-cp312-win_amd64.whl (1.2 MB)
+   ---------------------------------------- 1.2/1.2 MB 8.3 MB/s  0:00:00
+Downloading h2-4.3.0-py3-none-any.whl (61 kB)
+Downloading qdrant_client-1.12.1-py3-none-any.whl (267 kB)
+Downloading langchain_qdrant-0.2.0-py3-none-any.whl (23 kB)
+Installing collected packages: qdrant-client, langchain-qdrant, h2, grpcio-tools, grpcio
+
+Successfully installed grpcio-1.80.0 grpcio-tools-1.80.0 h2-4.3.0 langchain-qdrant-0.2.0 qdrant-client-1.12.1

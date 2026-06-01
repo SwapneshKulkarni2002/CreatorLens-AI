@@ -1,0 +1,279 @@
+"use client";
+
+import { FormEvent, useMemo, useState } from "react";
+import { BarChart3, Clock, Loader2, MessageSquare, Play, Send, Sparkles, TrendingUp } from "lucide-react";
+
+type VideoMetrics = {
+  video_id: string;
+  platform: string;
+  url: string;
+  title?: string | null;
+  creator?: string | null;
+  creator_url?: string | null;
+  follower_count?: number | null;
+  views?: number | null;
+  likes?: number | null;
+  comments?: number | null;
+  hashtags: string[];
+  upload_date?: string | null;
+  duration_seconds?: number | null;
+  engagement_rate?: number | null;
+  transcript_preview: string;
+  transcript_char_count: number;
+};
+
+type AnalyzeResponse = {
+  session_id: string;
+  videos: VideoMetrics[];
+  chunk_count: number;
+};
+
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+
+function formatNumber(value?: number | null) {
+  if (value === null || value === undefined) return "Unknown";
+  return new Intl.NumberFormat("en", { notation: value > 9999 ? "compact" : "standard" }).format(value);
+}
+
+function formatRate(value?: number | null) {
+  if (value === null || value === undefined) return "Unknown";
+  return `${value.toFixed(2)}%`;
+}
+
+function VideoCard({ video }: { video: VideoMetrics }) {
+  return (
+    <article className="video-card">
+      <div className="card-shine" />
+      <div className="video-card__top">
+        <div>
+          <p className="eyebrow">Video {video.video_id} · {video.platform}</p>
+          <h2>{video.title || "Untitled video"}</h2>
+        </div>
+        <a href={video.url} target="_blank" rel="noreferrer" className="icon-link" aria-label={`Open Video ${video.video_id}`}>
+          <Play size={18} />
+        </a>
+      </div>
+
+      <div className="creator-line">
+        <span>{video.creator || "Unknown creator"}</span>
+        <span>{formatNumber(video.follower_count)} followers</span>
+      </div>
+
+      <div className="metric-grid">
+        <span><strong>{formatNumber(video.views)}</strong> views</span>
+        <span><strong>{formatNumber(video.likes)}</strong> likes</span>
+        <span><strong>{formatNumber(video.comments)}</strong> comments</span>
+        <span className="metric-grid__hot"><strong>{formatRate(video.engagement_rate)}</strong> engagement</span>
+      </div>
+
+      <div className="meta-row">
+        <span>{video.upload_date || "Date unknown"}</span>
+        <span>{video.duration_seconds ? `${Math.round(video.duration_seconds)}s` : "Duration unknown"}</span>
+        <span>{formatNumber(video.transcript_char_count)} transcript chars</span>
+      </div>
+
+      <p className="transcript-preview">{video.transcript_preview || "No transcript preview available."}</p>
+
+      <div className="tags">
+        {video.hashtags.slice(0, 8).map((tag) => (
+          <span key={tag}>#{tag}</span>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+export default function Home() {
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [instagramUrl, setInstagramUrl] = useState("");
+  const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [chat, setChat] = useState<ChatMessage[]>([]);
+
+  const canChat = Boolean(analysis?.session_id) && !isStreaming;
+  const exampleQuestions = useMemo(
+    () => [
+      "Why did Video A get more engagement than Video B?",
+      "What's the engagement rate of each?",
+      "Compare the hooks in the first 5 seconds.",
+      "Who's the creator of Video B and what's their follower count?",
+      "Suggest improvements for B based on what worked in A."
+    ],
+    []
+  );
+
+  async function analyze(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setIsAnalyzing(true);
+    setChat([]);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ youtube_url: youtubeUrl, instagram_url: instagramUrl })
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || "Video analysis failed.");
+      }
+      setAnalysis(await response.json());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Something went wrong.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
+  async function sendChat(text = message) {
+    const trimmed = text.trim();
+    if (!analysis?.session_id || !trimmed || isStreaming) return;
+
+    setMessage("");
+    setError("");
+    setIsStreaming(true);
+    setChat((current) => [...current, { role: "user", content: trimmed }, { role: "assistant", content: "" }]);
+
+    try {
+      const response = await fetch(`${API_BASE}/api/chat/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: analysis.session_id, message: trimmed })
+      });
+      if (!response.ok || !response.body) throw new Error("Chat stream failed.");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() || "";
+
+        for (const frame of frames) {
+          const line = frame.split("\n").find((entry) => entry.startsWith("data: "));
+          if (!line) continue;
+          const data = line.slice(6);
+          if (data === "[DONE]") continue;
+          const { token } = JSON.parse(data);
+          setChat((current) => {
+            const next = [...current];
+            const last = next[next.length - 1];
+            next[next.length - 1] = { ...last, content: last.content + token };
+            return next;
+          });
+        }
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Chat failed.");
+    } finally {
+      setIsStreaming(false);
+    }
+  }
+
+  return (
+    <main className="shell">
+      <section className="topbar">
+        <div>
+          <p className="eyebrow">CreatorLens AI</p>
+          <h1>Compare two creator videos with cited RAG answers.</h1>
+          <p className="hero-copy">Drop in one YouTube link and one Instagram Reel. CreatorLens builds a transcript index, measures engagement, and streams source-backed answers.</p>
+        </div>
+        <div className="status-pill">
+          <Sparkles size={16} />
+          LangChain · Qdrant · Streaming
+        </div>
+      </section>
+
+      <form className="input-band" onSubmit={analyze}>
+        <label>
+          YouTube URL
+          <input value={youtubeUrl} onChange={(event) => setYoutubeUrl(event.target.value)} placeholder="https://www.youtube.com/watch?v=..." required />
+        </label>
+        <label>
+          Instagram Reel URL
+          <input value={instagramUrl} onChange={(event) => setInstagramUrl(event.target.value)} placeholder="https://www.instagram.com/reel/..." required />
+        </label>
+        <button type="submit" disabled={isAnalyzing}>
+          {isAnalyzing ? <Loader2 className="spin" size={18} /> : <BarChart3 size={18} />}
+          Analyze
+        </button>
+      </form>
+
+      <section className="proof-strip" aria-label="Workflow">
+        <span><Clock size={16} /> Extract metadata</span>
+        <span><TrendingUp size={16} /> Score engagement</span>
+        <span><MessageSquare size={16} /> Ask cited questions</span>
+      </section>
+
+      {error && <div className="error">{error}</div>}
+
+      <section className="workspace">
+        <div className="videos">
+          {analysis ? (
+            <>
+              <div className="analysis-meta">{analysis.chunk_count} transcript chunks indexed for session {analysis.session_id.slice(0, 8)}</div>
+              <div className="video-grid">
+                {analysis.videos.map((video) => <VideoCard key={video.video_id} video={video} />)}
+              </div>
+            </>
+          ) : (
+            <div className="empty-state">
+              <BarChart3 size={28} />
+              <p>Submit one YouTube video and one Instagram Reel to build the dynamic comparison index.</p>
+            </div>
+          )}
+        </div>
+
+        <aside className="chat-panel">
+          <div className="chat-header">
+            <div>
+              <p className="eyebrow">RAG Chat</p>
+              <h2>Ask performance questions</h2>
+            </div>
+            <MessageSquare size={20} />
+          </div>
+
+          <div className="quick-prompts">
+            {exampleQuestions.map((question) => (
+              <button key={question} type="button" onClick={() => sendChat(question)} disabled={!canChat}>
+                {question}
+              </button>
+            ))}
+          </div>
+
+          <div className="messages">
+            {chat.length === 0 ? (
+              <p className="hint">Answers stream with citations once analysis finishes.</p>
+            ) : (
+              chat.map((entry, index) => (
+                <div key={`${entry.role}-${index}`} className={`message ${entry.role}`}>
+                  {entry.content || (entry.role === "assistant" ? "Thinking..." : "")}
+                </div>
+              ))
+            )}
+          </div>
+
+          <form className="chat-input" onSubmit={(event) => { event.preventDefault(); sendChat(); }}>
+            <input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Ask about hooks, metrics, creators, or improvements" disabled={!analysis} />
+            <button type="submit" disabled={!canChat || !message.trim()} aria-label="Send message">
+              {isStreaming ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
+            </button>
+          </form>
+        </aside>
+      </section>
+    </main>
+  );
+}

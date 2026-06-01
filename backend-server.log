@@ -1,0 +1,8 @@
+INFO:     Started server process [12464]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:56450 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58409 - "OPTIONS /api/analyze HTTP/1.1" 200 OK
+ERROR: [youtube] GpQSUjNsNm0: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies
+INFO:     127.0.0.1:58409 - "POST /api/analyze HTTP/1.1" 422 Unprocessable Entity
