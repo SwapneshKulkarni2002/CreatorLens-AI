@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import json
+import logging
 import re
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 import httpx
 from openai import OpenAI
@@ -66,15 +70,17 @@ def _youtube_id(url: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _base_ytdlp_opts() -> dict[str, Any]:
+def _base_ytdlp_opts(use_cookies: bool = False) -> dict[str, Any]:
     settings = get_settings()
     opts: dict[str, Any] = {
         "quiet": True,
         "skip_download": True,
         "no_warnings": True,
         "extract_flat": False,
+        "format": "best/bestvideo+bestaudio/bestvideo/bestaudio",
+        "ignore_no_formats_error": True,
     }
-    if settings.ytdlp_cookies_from_browser:
+    if use_cookies and settings.ytdlp_cookies_from_browser:
         opts["cookiesfrombrowser"] = (settings.ytdlp_cookies_from_browser,)
     return opts
 
@@ -87,7 +93,7 @@ def _youtube_oembed_metadata(url: str, fallback_video_id: str) -> dict[str, Any]
     )
     response.raise_for_status()
     data = response.json()
-    return {
+    result = {
         "id": _youtube_id(url) or fallback_video_id,
         "title": data.get("title") or "YouTube video",
         "uploader": data.get("author_name") or "Unknown creator",
@@ -101,6 +107,79 @@ def _youtube_oembed_metadata(url: str, fallback_video_id: str) -> dict[str, Any]
         "duration": None,
         "upload_date": None,
     }
+    logger.info("oEmbed returned title=%s, author=%s", result["title"], result["uploader"])
+    return result
+
+
+def _youtube_page_stats(url: str) -> dict[str, Any]:
+    """Scrape real stats from the YouTube watch page HTML for enrichment."""
+    stats: dict[str, Any] = {}
+    try:
+        resp = httpx.get(url, timeout=15, follow_redirects=True, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
+        html = resp.text
+
+        # Extract view count from meta tag or ytInitialData
+        vc_match = re.search(r'"viewCount"\s*:\s*"(\d+)"', html)
+        if vc_match:
+            stats["view_count"] = int(vc_match.group(1))
+
+        # Extract like count (approx label)
+        lk_match = re.search(r'"defaultText"\s*:\s*\{"accessibility"\s*:\s*\{"accessibilityData"\s*:\s*\{"label"\s*:\s*"([\d,]+)\s+likes', html)
+        if lk_match:
+            stats["like_count"] = int(lk_match.group(1).replace(",", ""))
+
+        # Extract description
+        desc_match = re.search(r'"shortDescription"\s*:\s*"((?:[^"\\]|\\.)*)"', html)
+        if desc_match:
+            stats["description"] = desc_match.group(1).encode().decode("unicode_escape", errors="replace")
+
+        # Extract keywords/tags
+        kw_match = re.search(r'"keywords"\s*:\s*\[([^\]]+)\]', html)
+        if kw_match:
+            try:
+                stats["tags"] = json.loads(f"[{kw_match.group(1)}]")
+            except Exception:
+                pass
+
+        # Extract duration from lengthSeconds
+        dur_match = re.search(r'"lengthSeconds"\s*:\s*"(\d+)"', html)
+        if dur_match:
+            stats["duration"] = int(dur_match.group(1))
+
+        # Extract upload date
+        date_match = re.search(r'"uploadDate"\s*:\s*"([^"]+)"', html)
+        if date_match:
+            stats["upload_date"] = date_match.group(1)
+
+        # Extract subscriber/follower count
+        sub_match = re.search(r'"subscriberCountText"\s*:\s*\{[^}]*"simpleText"\s*:\s*"([^"]+)"', html)
+        if sub_match:
+            sub_text = sub_match.group(1).replace(" subscribers", "").strip()
+            stats["channel_follower_count"] = _parse_short_number(sub_text)
+
+        logger.info("YouTube page stats scraped: %s", {k: v for k, v in stats.items() if k != 'description'})
+    except Exception as exc:
+        logger.warning("YouTube page scrape failed: %s", exc)
+    return stats
+
+
+def _parse_short_number(text: str) -> int | None:
+    """Parse compact numbers like '1.2M', '345K', '12' into integers."""
+    text = text.strip().upper().replace(",", "")
+    multipliers = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}
+    for suffix, mult in multipliers.items():
+        if text.endswith(suffix):
+            try:
+                return int(float(text[:-1]) * mult)
+            except ValueError:
+                return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
 
 
 def _transcript_from_youtube_api(url: str) -> str | None:
@@ -187,102 +266,144 @@ def _metadata(video_id: str, platform: str, url: str, info: dict[str, Any]) -> d
     }
 
 
+def _instagram_oembed_metadata(url: str, video_id: str) -> dict[str, Any] | None:
+    """Try Instagram oEmbed API to get real title and author for Reels."""
+    try:
+        response = httpx.get(
+            "https://www.instagram.com/api/v1/oembed/",
+            params={"url": url},
+            timeout=12,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        result = {
+            "id": video_id,
+            "title": data.get("title") or None,
+            "uploader": data.get("author_name") or None,
+            "uploader_url": f"https://www.instagram.com/{data['author_name']}/" if data.get("author_name") else None,
+            "webpage_url": url,
+            "view_count": None,
+            "like_count": None,
+            "comment_count": None,
+            "description": data.get("title") or None,
+            "tags": [],
+            "duration": None,
+            "upload_date": None,
+        }
+        logger.info("Instagram oEmbed returned title=%s, author=%s", result.get("title"), result.get("uploader"))
+        return result
+    except Exception as exc:
+        logger.warning("Instagram oEmbed failed: %s", exc)
+        return None
+
+
 def extract_video(url: str, video_id: str, platform: str) -> ExtractedVideo:
     transcript = None
     if platform == "youtube":
         try:
             transcript = _transcript_from_youtube_api(url)
-        except Exception:
+            logger.info("YouTube Transcript API returned %d chars", len(transcript) if transcript else 0)
+        except Exception as exc:
+            logger.warning("YouTube Transcript API failed: %s", exc)
             transcript = None
 
+    # Step 1: Try yt-dlp WITHOUT cookies (avoids Windows Chrome cookie crash)
+    info = None
     try:
-        with YoutubeDL(_base_ytdlp_opts()) as ydl:
+        with YoutubeDL(_base_ytdlp_opts(use_cookies=False)) as ydl:
             info = ydl.extract_info(url, download=False)
+        logger.info("yt-dlp (no cookies) extracted: title=%s, views=%s, likes=%s",
+                     info.get('title'), info.get('view_count'), info.get('like_count'))
     except Exception as exc:
-        if platform != "youtube":
-            # Instagram or other platform fallback
-            info = {
-                "id": video_id,
-                "title": f"Instagram Reel {video_id} - Aesthetic Storytelling",
-                "uploader": "Instagram Creator",
-                "webpage_url": url,
-                "view_count": 45000 if video_id == "A" else 28000,
-                "like_count": 3200 if video_id == "A" else 1500,
-                "comment_count": 210 if video_id == "A" else 84,
-                "description": "Premium lifestyle, cinematography, and trending hooks presentation. #lifestyle #contentcreator #visuals",
-                "tags": ["lifestyle", "contentcreator", "visuals"],
-                "duration": 45 if video_id == "A" else 30,
-                "upload_date": "20260525",
-            }
-        else:
+        logger.warning("yt-dlp (no cookies) failed for %s: %s", platform, exc)
+        info = None
+
+    # Step 2: If Step 1 failed, retry yt-dlp WITH cookies
+    if info is None:
+        try:
+            with YoutubeDL(_base_ytdlp_opts(use_cookies=True)) as ydl:
+                info = ydl.extract_info(url, download=False)
+            logger.info("yt-dlp (with cookies) extracted: title=%s, views=%s, likes=%s",
+                         info.get('title'), info.get('view_count'), info.get('like_count'))
+        except Exception as exc:
+            logger.warning("yt-dlp (with cookies) also failed for %s: %s", platform, exc)
+            info = None
+
+    # Step 3: Platform-specific fallbacks when yt-dlp completely fails
+    if info is None:
+        if platform == "youtube":
+            # Try oEmbed for title/author
             try:
                 info = _youtube_oembed_metadata(url, video_id)
-            except Exception:
-                info = {
-                    "id": _youtube_id(url) or video_id,
-                    "title": "Strategic Growth & Visual Hook Guide",
-                    "uploader": "YouTube Creator",
-                    "webpage_url": url,
-                    "view_count": 120000 if video_id == "A" else 65000,
-                    "like_count": 8600 if video_id == "A" else 3900,
-                    "comment_count": 430 if video_id == "A" else 180,
-                    "description": "How to scale your audience and hook them in the first 5 seconds. #growth #strategy #hooks",
-                    "tags": ["growth", "strategy", "hooks"],
-                    "duration": 580,
-                    "upload_date": "20260520",
-                }
+            except Exception as exc:
+                logger.warning("YouTube oEmbed failed: %s", exc)
+                info = None
+        else:
+            # Try Instagram oEmbed for title/author
+            info = _instagram_oembed_metadata(url, video_id)
 
-    # Merge dynamic high-quality metric fallbacks if they are missing/None in yt-dlp/oEmbed response
-    info["like_count"] = info.get("like_count") or (8600 if video_id == "A" else 3900)
-    info["comment_count"] = info.get("comment_count") or (430 if video_id == "A" else 180)
-    
-    # Dynamically estimate views if missing to keep metrics perfectly consistent (especially for Reels)
-    info["view_count"] = info.get("view_count") or (
-        int(info["like_count"] * 7.5 + (info["comment_count"] or 0) * 10)
-        if info.get("like_count") else
-        (120000 if video_id == "A" else 65000)
-    )
-    
-    info["duration"] = info.get("duration") or (580 if platform == "youtube" else 45)
-    info["upload_date"] = info.get("upload_date") or ("20260520" if platform == "youtube" else "20260525")
-    info["description"] = info.get("description") or (
-        "How to scale your audience and hook them in the first 5 seconds. #growth #strategy #hooks"
-        if platform == "youtube" else
-        "Premium lifestyle, cinematography, and trending hooks presentation. #lifestyle #contentcreator #visuals"
-    )
-    if not info.get("tags"):
-        info["tags"] = ["growth", "strategy", "hooks"] if platform == "youtube" else ["lifestyle", "contentcreator", "visuals"]
+    # Step 4: For YouTube, always try page scraping to fill in missing stats
+    if platform == "youtube":
+        page_stats = _youtube_page_stats(url)
+        if info is not None and page_stats:
+            for key, value in page_stats.items():
+                if value is not None and not info.get(key):
+                    info[key] = value
+                    logger.info("Page scraper filled in %s=%s", key, value if key != "description" else f"({len(str(value))} chars)")
+        elif info is None and page_stats:
+            # Build info entirely from page stats
+            info = {
+                "id": _youtube_id(url) or video_id,
+                "webpage_url": url,
+                **page_stats,
+            }
 
-    try:
-        transcript = transcript or _transcript_from_subtitles(info)
-    except Exception:
-        transcript = transcript
+    # Step 5: If we still have nothing, build a minimal shell so _metadata() won't crash
+    if info is None:
+        logger.info("All extraction methods failed for %s — using empty shell", platform)
+        info = {
+            "id": video_id,
+            "title": None,
+            "uploader": None,
+            "webpage_url": url,
+            "view_count": None,
+            "like_count": None,
+            "comment_count": None,
+            "description": None,
+            "tags": [],
+            "duration": None,
+            "upload_date": None,
+        }
 
+    # Try to get transcript from subtitles embedded in yt-dlp info
+    if not transcript:
+        try:
+            transcript = _transcript_from_subtitles(info)
+            if transcript:
+                logger.info("Got transcript from subtitles (%d chars)", len(transcript))
+        except Exception:
+            pass
+
+    # Try Whisper as a last resort for transcript
     if not transcript:
         try:
             transcript = _transcript_from_whisper(url)
+            if transcript:
+                logger.info("Got transcript from Whisper (%d chars)", len(transcript))
         except Exception:
-            transcript = None
+            pass
 
-    if not transcript or len(transcript.strip()) < 20:
-        actual_title = info.get("title") or "Untitled video"
-        if platform == "youtube":
-            transcript = (
-                f"{actual_title}\n\n"
-                f"[0:00 - 0:05] Today I am showing you exactly how we scaled this video: {actual_title}.\n"
-                f"[0:05 - 1:00] The secret is the first 5 seconds hook. You need dynamic movement and a clear verbal promise.\n"
-                f"[1:00 - 3:00] Next, we structure the video with high retention edits. Make a visual cut every 3 seconds.\n"
-                f"[3:00 - 6:00] Finally, look at your analytics. Average percentage viewed is the single most important metric.\n"
-                f"[6:00 - 9:40] Keep practicing and optimizing your hooks!"
-            )
-        else:
-            transcript = (
-                f"{actual_title} hook and pacing showcase\n\n"
-                f"[0:00 - 0:05] Aesthetic routine showcasing: {actual_title}. The camera pans across the scene.\n"
-                f"[0:05 - 0:15] We set up the perfect lighting. High contrast, warm tones.\n"
-                f"[0:15 - 0:30] Here are the color grading adjustments. Tone curve, exposure, saturation.\n"
-                f"[0:30 - 0:45] Let me know what you think of this cinematic morning Reel! Follow for more tips."
-            )
+    # If there is truly no transcript, provide a minimal note (not fake content)
+    if not transcript or len(transcript.strip()) < 10:
+        title = info.get("title") or "this video"
+        transcript = f"[No transcript available for {title}. The video metadata and engagement metrics are shown above.]"
+        logger.info("No transcript found for %s, using placeholder", platform)
+
+    logger.info("Final extraction for %s: title=%s, views=%s, likes=%s, transcript=%d chars",
+                platform, info.get('title'), info.get('view_count'), info.get('like_count'), len(transcript))
 
     return ExtractedVideo(
         video_id=video_id,
