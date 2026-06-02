@@ -502,15 +502,57 @@ button:disabled {
   border: 1px solid var(--line);
 }
 
-.transcript-preview {
-  margin: 0;
-  color: #d1d5db;
-  line-height: 1.6;
-  font-size: 13.5px;
+.transcript-box {
   background: rgba(0, 0, 0, 0.2);
   padding: 12px;
   border-radius: 8px;
   border-left: 3px solid var(--accent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.transcript-text {
+  margin: 0;
+  color: #d1d5db;
+  line-height: 1.6;
+  font-size: 13.5px;
+  white-space: pre-wrap;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.transcript-text.expanded {
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.read-more-btn {
+  align-self: flex-start;
+  min-height: unset;
+  height: unset;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+.read-more-btn:hover {
+  opacity: 0.8;
+  color: var(--accent-mint);
+  transform: none !important;
+  box-shadow: none !important;
+  filter: none !important;
 }
 
 .tags {

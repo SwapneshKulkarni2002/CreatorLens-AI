@@ -24,6 +24,7 @@ class VideoMetrics(BaseModel):
     engagement_rate: float | None = None
     transcript_preview: str = ""
     transcript_char_count: int = 0
+    transcript: str = ""
 
 
 class AnalyzeResponse(BaseModel):

@@ -20,6 +20,7 @@ type VideoMetrics = {
   engagement_rate?: number | null;
   transcript_preview: string;
   transcript_char_count: number;
+  transcript: string;
 };
 
 type AnalyzeResponse = {
@@ -46,6 +47,9 @@ function formatRate(value?: number | null) {
 }
 
 function VideoCard({ video }: { video: VideoMetrics }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const showReadMore = video.transcript && video.transcript.length > video.transcript_preview.length;
+
   return (
     <article className="video-card">
       <div className="card-shine" />
@@ -80,7 +84,20 @@ function VideoCard({ video }: { video: VideoMetrics }) {
         <span>{formatNumber(video.transcript_char_count)} chars</span>
       </div>
 
-      <p className="transcript-preview">{video.transcript_preview || "No transcript preview available."}</p>
+      <div className="transcript-box">
+        <p className={`transcript-text ${isExpanded ? "expanded" : ""}`}>
+          {isExpanded ? video.transcript : (video.transcript_preview || "No transcript preview available.")}
+        </p>
+        {showReadMore && (
+          <button 
+            type="button" 
+            onClick={() => setIsExpanded(!isExpanded)} 
+            className="read-more-btn"
+          >
+            {isExpanded ? "Show Less" : "Read Full Transcript"}
+          </button>
+        )}
+      </div>
 
       <div className="tags">
         {video.hashtags.slice(0, 6).map((tag) => (

@@ -48,6 +48,7 @@ def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
                 **video.metadata,
                 transcript_preview=video.transcript[:320],
                 transcript_char_count=len(video.transcript),
+                transcript=video.transcript,
             )
             for video in videos
         ],

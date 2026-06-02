@@ -352,6 +352,9 @@ def _enrich_video_with_llm(
         return info, transcript
 
     title = info.get("title") or info.get("fulltitle") or ""
+    # Detect generic Instagram titles like "Video by username", "Post by username", "Reel by username", etc.
+    is_generic_title = not title or any(str(title).lower().startswith(prefix) for prefix in ("video by ", "post by ", "reel by ", "instagram post"))
+
     uploader = info.get("uploader") or info.get("channel") or info.get("creator") or ""
     description = info.get("description") or ""
     tags = ", ".join(info.get("tags") or [])
@@ -364,7 +367,7 @@ def _enrich_video_with_llm(
     has_real_transcript = transcript and len(transcript.strip()) > 10 and not transcript.startswith("[No transcript available")
 
     # If all metrics are present, do not invoke LLM
-    if title and uploader and like_count and comment_count and view_count and follower_count and has_real_transcript:
+    if title and not is_generic_title and uploader and like_count and comment_count and view_count and follower_count and has_real_transcript:
         return info, transcript
 
     prompt = f"""You are a creator analytics data enrichment tool.
@@ -372,7 +375,7 @@ Your job is to search your knowledge database and estimate/enrich the missing me
 Input metadata:
 - URL: {url}
 - Platform: {platform}
-- Title: {title or 'None'}
+- Title: {title if not is_generic_title else 'None (The current title is a generic placeholder and needs to be replaced)'}
 - Uploader/Creator: {uploader or 'None'}
 - Description: {description or 'None'}
 - Tags: {tags or 'None'}
@@ -385,8 +388,9 @@ Input metadata:
 Rules:
 1. If uploader/creator name is known, search your knowledge base for their real follower count as of 2026 and provide it. If not known, estimate a reasonable follower count (e.g. 500,000).
 2. If views count is missing, estimate it based on likes and comments. Views are typically 10 to 35 times the likes. For example, if likes is 10,000, views should be around 150,000 to 250,000.
-3. If the transcript is missing or a placeholder, generate a highly realistic, detailed transcript or description of the spoken/visual content of the video based on the title, description, and hashtags. If the video is a well-known viral video (e.g. Rick Astley - Never Gonna Give You Up), output its actual transcript.
-4. Output your response as a raw JSON object containing these keys: 'title', 'uploader', 'follower_count', 'views', 'likes', 'comments', 'transcript'. Do not output markdown, code blocks, or any text other than the JSON object. Do NOT escape standard characters like square brackets [ or ] with backslashes. Keep them as raw [ and ]."""
+3. If the title is missing, generic, or a placeholder (like 'Video by...'), generate a highly descriptive, engaging, and accurate title (e.g. "Ashley Park's White Elephant Gift Exchange" or "Tonight Show featuring Olivia Rodrigo") based on the description, hashtags, and uploader.
+4. If the transcript is missing or a placeholder, generate a highly realistic, detailed transcript or description of the spoken/visual content of the video based on the title, description, and hashtags. If the video is a well-known viral video (e.g. Rick Astley - Never Gonna Give You Up), output its actual transcript.
+5. Output your response as a raw JSON object containing these keys: 'title', 'uploader', 'follower_count', 'views', 'likes', 'comments', 'transcript'. Do not output markdown, code blocks, or any text other than the JSON object. Do NOT escape standard characters like square brackets [ or ] with backslashes. Keep them as raw [ and ]."""
 
     try:
         if settings.nvidia_api_key:
@@ -408,7 +412,7 @@ Rules:
         data = _parse_json_robust(result_text)
         logger.info("LLM enriched response: %s", {k: v for k, v in data.items() if k != "transcript"})
         
-        if not info.get("title") and data.get("title"):
+        if (not info.get("title") or is_generic_title) and data.get("title"):
             info["title"] = data["title"]
         if not info.get("uploader") and data.get("uploader"):
             info["uploader"] = data["uploader"]
