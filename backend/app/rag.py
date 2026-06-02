@@ -5,9 +5,11 @@ import uuid
 from collections import defaultdict
 from typing import AsyncIterator
 
+import httpx
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.embeddings import Embeddings
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
 
@@ -24,11 +26,46 @@ def new_session_id() -> str:
     return uuid.uuid4().hex
 
 
+class NvidiaNIMEmbeddings(Embeddings):
+    def __init__(self, model: str, api_key: str, base_url: str):
+        self.model = model
+        self.api_key = api_key
+        self.url = f"{base_url.rstrip('/')}/embeddings"
+
+    def _embed(self, text: str, input_type: str) -> list[float]:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+        payload = {
+            "input": text,
+            "model": self.model,
+            "input_type": input_type
+        }
+        response = httpx.post(self.url, json=payload, headers=headers, timeout=30.0)
+        response.raise_for_status()
+        return response.json()["data"][0]["embedding"]
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        # For documents/passage indexing, use input_type="passage"
+        return [self._embed(text, "passage") for text in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        # For search querying, use input_type="query"
+        return self._embed(text, "query")
+
 def _embeddings():
     settings = get_settings()
+    if settings.nvidia_api_key:
+        return NvidiaNIMEmbeddings(
+            model=settings.nvidia_embedding_model,
+            api_key=settings.nvidia_api_key,
+            base_url=settings.nvidia_embedding_base_url,
+        )
     if settings.openai_api_key:
         return OpenAIEmbeddings(model=settings.openai_embedding_model, api_key=settings.openai_api_key)
-    raise RuntimeError("OPENAI_API_KEY is required to embed transcripts for this demo.")
+    raise RuntimeError("NVIDIA_API_KEY or OPENAI_API_KEY is required to embed transcripts for this demo.")
 
 
 def _collection(session_id: str) -> QdrantVectorStore:
@@ -103,7 +140,7 @@ def _fallback_answer(question: str, docs: list[Document], session_id: str) -> st
     metrics = SESSION_METRICS.get(session_id, [])
     citations = sorted({doc.metadata.get("source", "retrieved chunk") for doc in docs})
     return (
-        "LLM streaming is disabled because no OPENAI_API_KEY is configured. "
+        "LLM streaming is disabled because no NVIDIA_API_KEY or OPENAI_API_KEY is configured. "
         "Retrieved evidence is available, so here is the dynamic context to inspect.\n\n"
         f"Question: {question}\n\n"
         f"Video metrics:\n{json.dumps(metrics, indent=2)}\n\n"
@@ -113,14 +150,13 @@ def _fallback_answer(question: str, docs: list[Document], session_id: str) -> st
 
 async def stream_answer(session_id: str, question: str) -> AsyncIterator[str]:
     vectorstore = _collection(session_id)
-    docs = vectorstore.similarity_search(question, k=6, filter={"session_id": session_id})
-    if not docs:
-        docs = vectorstore.similarity_search(question, k=6)
+    docs = vectorstore.similarity_search(question, k=6)
 
     settings = get_settings()
     citations = sorted({doc.metadata.get("source", "unknown source") for doc in docs})
 
-    if not settings.openai_api_key:
+    api_key = settings.nvidia_api_key or settings.openai_api_key
+    if not api_key:
         answer = _fallback_answer(question, docs, session_id)
         SESSION_MEMORY[session_id].append((question, answer))
         yield answer
@@ -144,7 +180,25 @@ async def stream_answer(session_id: str, question: str) -> AsyncIterator[str]:
             ),
         ]
     )
-    llm = ChatOpenAI(model=settings.openai_chat_model, temperature=0.2, streaming=True, api_key=settings.openai_api_key)
+
+    if settings.nvidia_api_key:
+        llm = ChatOpenAI(
+            model=settings.nvidia_model,
+            temperature=0.2,
+            max_tokens=1024,
+            model_kwargs={"top_p": 0.7},
+            streaming=True,
+            api_key=settings.nvidia_api_key,
+            base_url=settings.nvidia_base_url,
+        )
+    else:
+        llm = ChatOpenAI(
+            model=settings.openai_chat_model,
+            temperature=0.2,
+            streaming=True,
+            api_key=settings.openai_api_key,
+        )
+    
     chain = prompt | llm
 
     full = ""

@@ -51,36 +51,39 @@ function VideoCard({ video }: { video: VideoMetrics }) {
       <div className="card-shine" />
       <div className="video-card__top">
         <div>
-          <p className="eyebrow">Video {video.video_id} · {video.platform}</p>
+          <span className={`platform-badge ${video.platform.toLowerCase()}`}>
+            {video.platform}
+          </span>
+          <p className="eyebrow" style={{ marginTop: "8px" }}>Video {video.video_id}</p>
           <h2>{video.title || "Untitled video"}</h2>
         </div>
         <a href={video.url} target="_blank" rel="noreferrer" className="icon-link" aria-label={`Open Video ${video.video_id}`}>
-          <Play size={18} />
+          <Play size={16} fill="currentColor" />
         </a>
       </div>
 
       <div className="creator-line">
-        <span>{video.creator || "Unknown creator"}</span>
+        <span className="creator-name">{video.creator || "Unknown creator"}</span>
         <span>{formatNumber(video.follower_count)} followers</span>
       </div>
 
       <div className="metric-grid">
-        <span><strong>{formatNumber(video.views)}</strong> views</span>
-        <span><strong>{formatNumber(video.likes)}</strong> likes</span>
-        <span><strong>{formatNumber(video.comments)}</strong> comments</span>
-        <span className="metric-grid__hot"><strong>{formatRate(video.engagement_rate)}</strong> engagement</span>
+        <span>Views <strong>{formatNumber(video.views)}</strong></span>
+        <span>Likes <strong>{formatNumber(video.likes)}</strong></span>
+        <span>Comments <strong>{formatNumber(video.comments)}</strong></span>
+        <span className="metric-grid__hot">Engagement <strong>{formatRate(video.engagement_rate)}</strong></span>
       </div>
 
       <div className="meta-row">
         <span>{video.upload_date || "Date unknown"}</span>
         <span>{video.duration_seconds ? `${Math.round(video.duration_seconds)}s` : "Duration unknown"}</span>
-        <span>{formatNumber(video.transcript_char_count)} transcript chars</span>
+        <span>{formatNumber(video.transcript_char_count)} chars</span>
       </div>
 
       <p className="transcript-preview">{video.transcript_preview || "No transcript preview available."}</p>
 
       <div className="tags">
-        {video.hashtags.slice(0, 8).map((tag) => (
+        {video.hashtags.slice(0, 6).map((tag) => (
           <span key={tag}>#{tag}</span>
         ))}
       </div>
@@ -186,14 +189,24 @@ export default function Home() {
   return (
     <main className="shell">
       <section className="topbar">
-        <div>
-          <p className="eyebrow">CreatorLens AI</p>
-          <h1>Compare two creator videos with cited RAG answers.</h1>
-          <p className="hero-copy">Drop in one YouTube link and one Instagram Reel. CreatorLens builds a transcript index, measures engagement, and streams source-backed answers.</p>
+        <div className="topbar-left">
+          <div className="topbar-logo">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img 
+              src="/banner.png" 
+              alt="CreatorLens AI Logo" 
+              style={{ width: "70px", height: "70px", objectFit: "cover" }} 
+            />
+          </div>
+          <div>
+            <p className="eyebrow">CreatorLens AI · NVIDIA Gemma 3 NIM</p>
+            <h1>Compare two creator videos with cited RAG answers.</h1>
+            <p className="hero-copy">Drop in one YouTube link and one Instagram Reel. CreatorLens builds a transcript index, measures engagement, and streams source-backed answers using Gemma 3.</p>
+          </div>
         </div>
         <div className="status-pill">
           <Sparkles size={16} />
-          LangChain · Qdrant · Streaming
+          <span>Gemma 3 · Qdrant · RAG</span>
         </div>
       </section>
 
@@ -208,14 +221,14 @@ export default function Home() {
         </label>
         <button type="submit" disabled={isAnalyzing}>
           {isAnalyzing ? <Loader2 className="spin" size={18} /> : <BarChart3 size={18} />}
-          Analyze
+          <span>Analyze Performance</span>
         </button>
       </form>
 
       <section className="proof-strip" aria-label="Workflow">
-        <span><Clock size={16} /> Extract metadata</span>
-        <span><TrendingUp size={16} /> Score engagement</span>
-        <span><MessageSquare size={16} /> Ask cited questions</span>
+        <span><Clock size={16} /> Extract metadata & fallback gracefully</span>
+        <span><TrendingUp size={16} /> Compute engagement rates</span>
+        <span><MessageSquare size={16} /> Query Gemma-3 with citations</span>
       </section>
 
       {error && <div className="error">{error}</div>}
@@ -224,14 +237,18 @@ export default function Home() {
         <div className="videos">
           {analysis ? (
             <>
-              <div className="analysis-meta">{analysis.chunk_count} transcript chunks indexed for session {analysis.session_id.slice(0, 8)}</div>
+              <div className="analysis-meta">
+                <Sparkles size={14} className="spin" />
+                <span>{analysis.chunk_count} transcript chunks indexed for session {analysis.session_id.slice(0, 8)}</span>
+              </div>
               <div className="video-grid">
                 {analysis.videos.map((video) => <VideoCard key={video.video_id} video={video} />)}
               </div>
             </>
           ) : (
             <div className="empty-state">
-              <BarChart3 size={28} />
+              <BarChart3 size={40} />
+              <h3>Comparison Index Ready</h3>
               <p>Submit one YouTube video and one Instagram Reel to build the dynamic comparison index.</p>
             </div>
           )}
@@ -240,10 +257,10 @@ export default function Home() {
         <aside className="chat-panel">
           <div className="chat-header">
             <div>
-              <p className="eyebrow">RAG Chat</p>
+              <p className="eyebrow">Strategic Assistant</p>
               <h2>Ask performance questions</h2>
             </div>
-            <MessageSquare size={20} />
+            <MessageSquare size={22} />
           </div>
 
           <div className="quick-prompts">
@@ -267,7 +284,7 @@ export default function Home() {
           </div>
 
           <form className="chat-input" onSubmit={(event) => { event.preventDefault(); sendChat(); }}>
-            <input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Ask about hooks, metrics, creators, or improvements" disabled={!analysis} />
+            <input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Ask about hooks, metrics, creators, or improvements..." disabled={!analysis} />
             <button type="submit" disabled={!canChat || !message.trim()} aria-label="Send message">
               {isStreaming ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
             </button>
