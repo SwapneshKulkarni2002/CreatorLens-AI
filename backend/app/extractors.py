@@ -322,6 +322,24 @@ def _instagram_oembed_metadata(url: str, video_id: str) -> dict[str, Any] | None
         return None
 
 
+def _parse_json_robust(text: str) -> dict[str, Any]:
+    text = text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    if text.endswith("```"):
+        text = text[:-3]
+    text = text.strip()
+    
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+        
+    # Replace backslash followed by any char that is NOT one of: " \ / b f n r t u
+    cleaned = re.sub(r'\\([^"\\/bfnrtu])', r'\1', text)
+    return json.loads(cleaned)
+
+
 def _enrich_video_with_llm(
     platform: str,
     url: str,
@@ -368,7 +386,7 @@ Rules:
 1. If uploader/creator name is known, search your knowledge base for their real follower count as of 2026 and provide it. If not known, estimate a reasonable follower count (e.g. 500,000).
 2. If views count is missing, estimate it based on likes and comments. Views are typically 10 to 35 times the likes. For example, if likes is 10,000, views should be around 150,000 to 250,000.
 3. If the transcript is missing or a placeholder, generate a highly realistic, detailed transcript or description of the spoken/visual content of the video based on the title, description, and hashtags. If the video is a well-known viral video (e.g. Rick Astley - Never Gonna Give You Up), output its actual transcript.
-4. Output your response as a raw JSON object containing these keys: 'title', 'uploader', 'follower_count', 'views', 'likes', 'comments', 'transcript'. Do not output markdown, code blocks, or any text other than the JSON object."""
+4. Output your response as a raw JSON object containing these keys: 'title', 'uploader', 'follower_count', 'views', 'likes', 'comments', 'transcript'. Do not output markdown, code blocks, or any text other than the JSON object. Do NOT escape standard characters like square brackets [ or ] with backslashes. Keep them as raw [ and ]."""
 
     try:
         if settings.nvidia_api_key:
@@ -387,14 +405,7 @@ Rules:
             temperature=0.1,
         )
         result_text = response.choices[0].message.content.strip()
-        
-        if result_text.startswith("```json"):
-            result_text = result_text[7:]
-        if result_text.endswith("```"):
-            result_text = result_text[:-3]
-        result_text = result_text.strip()
-        
-        data = json.loads(result_text)
+        data = _parse_json_robust(result_text)
         logger.info("LLM enriched response: %s", {k: v for k, v in data.items() if k != "transcript"})
         
         if not info.get("title") and data.get("title"):
