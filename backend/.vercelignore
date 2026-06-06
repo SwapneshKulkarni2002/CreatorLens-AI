@@ -1,0 +1,12 @@
+.venv
+pip-build-env-*
+pip-build-tracker-*
+pip-ephem-wheel-cache-*
+pip-install-*
+pip-metadata-*
+pip-modern-metadata-*
+pip-unpack-*
+__pycache__
+.chroma
+.env
+.env.local
