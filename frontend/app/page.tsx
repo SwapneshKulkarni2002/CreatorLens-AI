@@ -50,6 +50,12 @@ function formatRate(value?: number | null) {
 function getInstagramEmbedUrl(urlStr: string): string {
   try {
     const url = new URL(urlStr);
+    const match = url.pathname.match(/\/(reel|p|tv)\/([A-Za-z0-9_-]+)/);
+    if (match) {
+      const type = match[1];
+      const shortcode = match[2];
+      return `https://www.instagram.com/${type}/${shortcode}/embed/`;
+    }
     let pathname = url.pathname;
     if (!pathname.endsWith('/')) {
       pathname += '/';

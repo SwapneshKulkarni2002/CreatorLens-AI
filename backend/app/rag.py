@@ -105,7 +105,7 @@ def _doc_metadata(session_id: str, video: ExtractedVideo, chunk_index: int) -> d
 
 
 def index_videos(session_id: str, videos: list[ExtractedVideo]) -> int:
-    splitter = RecursiveCharacterTextSplitter(chunk_size=900, chunk_overlap=160)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=80)
     docs: list[Document] = []
 
     for video in videos:
