@@ -14,6 +14,7 @@ type VideoMetrics = {
   views?: number | null;
   likes?: number | null;
   comments?: number | null;
+  thumbnail?: string | null;
   hashtags: string[];
   upload_date?: string | null;
   duration_seconds?: number | null;
@@ -46,13 +47,83 @@ function formatRate(value?: number | null) {
   return `${value.toFixed(2)}%`;
 }
 
+function getInstagramEmbedUrl(urlStr: string): string {
+  try {
+    const url = new URL(urlStr);
+    let pathname = url.pathname;
+    if (!pathname.endsWith('/')) {
+      pathname += '/';
+    }
+    return `${url.origin}${pathname}embed/`;
+  } catch (e) {
+    return urlStr;
+  }
+}
+
+function getYouTubeEmbedUrl(urlStr: string): string {
+  try {
+    const url = new URL(urlStr);
+    if (url.hostname.includes("youtu.be")) {
+      const videoId = url.pathname.slice(1);
+      return `https://www.youtube.com/embed/${videoId}`;
+    }
+    if (url.pathname.startsWith("/shorts/")) {
+      const videoId = url.pathname.split("/")[2];
+      return `https://www.youtube.com/embed/${videoId}`;
+    }
+    const videoId = url.searchParams.get("v");
+    if (videoId) {
+      return `https://www.youtube.com/embed/${videoId}`;
+    }
+    return urlStr;
+  } catch (e) {
+    return urlStr;
+  }
+}
+
 function VideoCard({ video }: { video: VideoMetrics }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const showReadMore = video.transcript && video.transcript.length > video.transcript_preview.length;
 
+  const isInstagram = video.platform.toLowerCase() === "instagram";
+  const isYouTube = video.platform.toLowerCase() === "youtube";
+
   return (
     <article className="video-card">
       <div className="card-shine" />
+      {isInstagram ? (
+        <div className="video-card__thumbnail embed">
+          <iframe
+            src={getInstagramEmbedUrl(video.url)}
+            className="embed-iframe"
+            title="Instagram Reel Preview"
+            scrolling="no"
+            allowFullScreen
+            allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
+          />
+        </div>
+      ) : isYouTube ? (
+        <div className="video-card__thumbnail embed">
+          <iframe
+            src={getYouTubeEmbedUrl(video.url)}
+            className="embed-iframe"
+            title="YouTube Video Preview"
+            allowFullScreen
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          />
+        </div>
+      ) : video.thumbnail ? (
+        <div className="video-card__thumbnail">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <a href={video.url} target="_blank" rel="noreferrer">
+            <img className="thumbnail-img" src={video.thumbnail} alt={video.title || "Video thumbnail"} loading="lazy" referrerPolicy="no-referrer" />
+          </a>
+        </div>
+      ) : (
+        <div className="video-card__thumbnail placeholder">
+          <span>No thumbnail</span>
+        </div>
+      )}
       <div className="video-card__top">
         <div>
           <span className={`platform-badge ${video.platform.toLowerCase()}`}>

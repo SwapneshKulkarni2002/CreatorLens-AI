@@ -281,6 +281,7 @@ def _metadata(video_id: str, platform: str, url: str, info: dict[str, Any]) -> d
         "views": views,
         "likes": likes,
         "comments": comments,
+        "thumbnail": info.get("thumbnail") or info.get("thumbnail_url"),
         "hashtags": _hashtags(info),
         "upload_date": _upload_date(info.get("upload_date") or info.get("timestamp")),
         "duration_seconds": info.get("duration"),
@@ -314,11 +315,58 @@ def _instagram_oembed_metadata(url: str, video_id: str) -> dict[str, Any] | None
             "tags": [],
             "duration": None,
             "upload_date": None,
+            "thumbnail": data.get("thumbnail_url") or None,
         }
-        logger.info("Instagram oEmbed returned title=%s, author=%s", result.get("title"), result.get("uploader"))
+        logger.info("Instagram oEmbed returned title=%s, author=%s, thumbnail=%s", result.get("title"), result.get("uploader"), result.get("thumbnail"))
         return result
     except Exception as exc:
         logger.warning("Instagram oEmbed failed: %s", exc)
+        return None
+
+# Helper to scrape richer Instagram metadata via public JSON endpoint
+def _instagram_scrape_metadata(url: str) -> dict[str, Any] | None:
+    """Fetch Instagram JSON metadata via the `?__a=1` endpoint, falling back to HTML meta tags."""
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        try:
+            resp = httpx.get(f"{url}?__a=1", headers=headers, timeout=10.0)
+            resp.raise_for_status()
+            data = resp.json()
+            media = data.get("graphql", {}).get("shortcode_media") or (data.get("items") or [None])[0]
+            if media:
+                result: dict[str, Any] = {}
+                caption_edges = media.get("edge_media_to_caption", {}).get("edges", [])
+                if caption_edges:
+                    result["title"] = caption_edges[0].get("node", {}).get("text")
+                if "video_view_count" in media:
+                    result["view_count"] = media.get("video_view_count")
+                if "edge_media_preview_like" in media:
+                    result["like_count"] = media["edge_media_preview_like"].get("count")
+                if "edge_media_to_comment" in media:
+                    result["comment_count"] = media["edge_media_to_comment"].get("count")
+                if "display_url" in media:
+                    result["thumbnail"] = media.get("display_url")
+                elif "thumbnail_src" in media:
+                    result["thumbnail"] = media.get("thumbnail_src")
+                owner = media.get("owner")
+                if isinstance(owner, dict) and "follower_count" in owner:
+                    result["uploader_followers"] = owner.get("follower_count")
+                return result if result else None
+        except Exception:
+            # Fallback to HTML scraping
+            resp = httpx.get(url, headers=headers, timeout=10.0)
+            resp.raise_for_status()
+            html = resp.text
+            result = {}
+            title_match = re.search(r'<meta property="og:title" content="([^"]+)"', html)
+            if title_match:
+                result["title"] = title_match.group(1)
+            thumb_match = re.search(r'<meta property="og:image" content="([^"]+)"', html)
+            if thumb_match:
+                result["thumbnail"] = thumb_match.group(1)
+            return result if result else None
+    except Exception as exc:
+        logger.debug("Instagram scrape exception: %s", exc)
         return None
 
 
@@ -478,8 +526,31 @@ def extract_video(url: str, video_id: str, platform: str) -> ExtractedVideo:
                 logger.warning("YouTube oEmbed failed: %s", exc)
                 info = None
         else:
-            # Try Instagram oEmbed for title/author
+            # Try Instagram oEmbed for title/author and fallback scrape
             info = _instagram_oembed_metadata(url, video_id)
+            if info is None:
+                info = {
+                    "id": video_id,
+                    "title": None,
+                    "uploader": None,
+                    "webpage_url": url,
+                    "view_count": None,
+                    "like_count": None,
+                    "comment_count": None,
+                    "description": None,
+                    "tags": [],
+                    "duration": None,
+                    "upload_date": None,
+                }
+            # Additional Instagram scraping for richer metadata
+            if platform == "instagram":
+                try:
+                    extra = _instagram_scrape_metadata(url)
+                    if extra:
+                        info.update(extra)
+                        logger.info("Instagram scrape added metadata: %s", extra)
+                except Exception as exc2:
+                    logger.warning("Instagram scrape failed: %s", exc2)
 
     # Step 4: For YouTube, always try page scraping to fill in missing stats
     if platform == "youtube":

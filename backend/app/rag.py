@@ -31,21 +31,27 @@ class NvidiaNIMEmbeddings(Embeddings):
         self.model = model
         self.api_key = api_key
         self.url = f"{base_url.rstrip('/')}/embeddings"
+        self._dim = 1024
 
     def _embed(self, text: str, input_type: str) -> list[float]:
+        if not text or not text.strip():
+            return [0.0] * self._dim
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
         payload = {
-            "input": text,
+            "input": [text],
             "model": self.model,
-            "input_type": input_type
+            "input_type": input_type,
+            "modality": "text"
         }
         response = httpx.post(self.url, json=payload, headers=headers, timeout=30.0)
         response.raise_for_status()
-        return response.json()["data"][0]["embedding"]
+        emb = response.json()["data"][0]["embedding"]
+        self._dim = len(emb)
+        return emb
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         # For documents/passage indexing, use input_type="passage"

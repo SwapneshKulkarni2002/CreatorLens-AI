@@ -18,6 +18,7 @@ class VideoMetrics(BaseModel):
     views: int | None = None
     likes: int | None = None
     comments: int | None = None
+    thumbnail: str | None = None
     hashtags: list[str] = []
     upload_date: str | None = None
     duration_seconds: float | None = None

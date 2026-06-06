@@ -355,6 +355,47 @@ button:disabled {
   pointer-events: none;
 }
 
+.video-card__thumbnail {
+  width: 100%;
+  overflow: hidden;
+  border-radius: 12px;
+  margin-bottom: 12px;
+  height: 180px; /* fixed height */
+  background: var(--panel);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-card__thumbnail.embed {
+  height: 340px; /* larger height for active video players */
+}
+
+.embed-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: 12px;
+}
+
+.video-card__thumbnail.placeholder {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.thumbnail-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.video-card__thumbnail:hover .thumbnail-img {
+  transform: scale(1.05);
+}
+
 .card-shine {
   position: absolute;
   inset: 0;
